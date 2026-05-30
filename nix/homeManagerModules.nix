@@ -347,7 +347,27 @@
           description = "Extra packages available on PATH.";
         };
 
-        
+        extraPlugins = lib.mkOption {
+          type = lib.types.listOf lib.types.package;
+          default = [ ];
+          description = ''
+            Directory-based plugin packages to symlink into the hermes plugins
+            directory. Each package should contain a plugin.yaml and __init__.py
+            at its root. Hermes discovers these automatically on startup.
+          '';
+          example = lib.literalExpression ''
+            [
+              (pkgs.fetchFromGitHub {
+                owner = "stephenschoettler";
+                repo = "hermes-lcm";
+                name = "hermes-lcm";
+                rev = "v0.7.0";
+                hash = "sha256-...";
+              })
+            ]
+          '';
+        };
+
         extraPythonPackages = lib.mkOption {
           type = lib.types.listOf lib.types.package;
           default = [ ];
@@ -481,6 +501,7 @@
               mkdir -p ${cfg.stateDir}/.hermes/sessions
               mkdir -p ${cfg.stateDir}/.hermes/logs
               mkdir -p ${cfg.stateDir}/.hermes/memories
+              mkdir -p ${cfg.stateDir}/.hermes/plugins
               mkdir -p ${cfg.workingDirectory}
 
               # Merge Nix settings into existing config.yaml.
@@ -533,6 +554,32 @@
                   install -m 0640 ${documentDerivation}/${name} ${cfg.workingDirectory}/${name}
                 '') cfg.documents
               )}
+
+              # ── Declarative plugins ─────────────────────────────────────────
+              ${lib.optionalString (cfg.extraPlugins != [ ]) ''
+                # Validate: no duplicate plugin names
+                PLUGIN_NAMES="$(${pkgs.coreutils}/bin/printf '%s\n' ${lib.concatStringsSep " " (map (p: lib.escapeShellArg (lib.getName p)) cfg.extraPlugins)})"
+                DUPES="$(${pkgs.coreutils}/bin/echo "$PLUGIN_NAMES" | ${pkgs.coreutils}/bin/sort | ${pkgs.coreutils}/bin/uniq -d)"
+                if [ -n "$DUPES" ]; then
+                  echo "ERROR: programs.hermes-agent.extraPlugins: duplicate plugin names detected: $DUPES" >&2
+                  echo "If using fetchFromGitHub, set name = \"plugin-name\" to disambiguate." >&2
+                  exit 1
+                fi
+
+                # Remove stale managed symlinks (plugins removed from config)
+                find ${cfg.stateDir}/.hermes/plugins -maxdepth 1 -type l -name 'nix-managed-*' -delete 2>/dev/null || true
+
+                ${lib.concatStringsSep "\n" (map (plugin:
+                  let
+                    name = lib.getName plugin;
+                  in ''
+                    if [ ! -f "${plugin}/plugin.yaml" ]; then
+                      echo "ERROR: extraPlugins entry '${plugin}' has no plugin.yaml" >&2
+                      exit 1
+                    fi
+                    ln -sfn ${plugin} ${cfg.stateDir}/.hermes/plugins/nix-managed-${name}
+                  '') cfg.extraPlugins)}
+              ''}
            '';
           }
 
