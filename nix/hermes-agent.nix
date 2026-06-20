@@ -182,9 +182,12 @@ stdenv.mkDerivation (finalAttrs: {
           --set HERMES_WEB_DIST $out/share/hermes-agent/web_dist \
           --set HERMES_TUI_DIR $out/ui-tui \
           --set HERMES_PYTHON ${hermesVenv}/bin/python3 \
-          --set HERMES_NODE ${lib.getExe nodejs} \
-          ${lib.optionalString (rev != null) ''--set HERMES_REVISION ${rev} \''}
-          ${lib.optionalString (extraPythonPackages != [ ]) ''--suffix PYTHONPATH : "${pythonPath}"''}
+          --set HERMES_NODE ${lib.getExe nodejs}${let
+            extraArgs = builtins.filter (s: s != "") [
+              (lib.optionalString (rev != null) "--set HERMES_REVISION ${rev}")
+              (lib.optionalString (extraPythonPackages != [ ]) "--suffix PYTHONPATH : \"${pythonPath}\"")
+            ];
+          in if extraArgs == [] then "" else " \\\n          ${lib.concatStringsSep " \\\n          " extraArgs}"}
       '')
       [
         "hermes"
